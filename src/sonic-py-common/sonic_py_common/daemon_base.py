@@ -13,13 +13,16 @@ REDIS_TIMEOUT_MSECS = 0
 EEPROM_MODULE_NAME = 'eeprom'
 EEPROM_CLASS_NAME = 'board'
 
+# The empty namespace refers to linux host namespace.
+EMPTY_NAMESPACE = ''
+
 #
 # Helper functions =============================================================
 #
 
-def db_connect(db_name):
+def db_connect(db_name, namespace=EMPTY_NAMESPACE):
     from swsscommon import swsscommon
-    return swsscommon.DBConnector(db_name, REDIS_TIMEOUT_MSECS, True)
+    return swsscommon.DBConnector(db_name, REDIS_TIMEOUT_MSECS, True, namespace)
 
 #
 # DaemonBase ===================================================================
@@ -41,15 +44,15 @@ class DaemonBase(Logger):
     # Default signal handler; can be overridden by subclass
     def signal_handler(self, sig, frame):
         if sig == signal.SIGHUP:
-            log_info("DaemonBase: Caught SIGHUP - ignoring...")
+            self.log_info("DaemonBase: Caught SIGHUP - ignoring...")
         elif sig == signal.SIGINT:
-            log_info("DaemonBase: Caught SIGINT - exiting...")
+            self.log_info("DaemonBase: Caught SIGINT - exiting...")
             sys.exit(128 + sig)
         elif sig == signal.SIGTERM:
-            log_info("DaemonBase: Caught SIGTERM - exiting...")
+            self.log_info("DaemonBase: Caught SIGTERM - exiting...")
             sys.exit(128 + sig)
         else:
-            log_warning("DaemonBase: Caught unhandled signal '{}'".format(sig))
+            self.log_warning("DaemonBase: Caught unhandled signal '{}'".format(sig))
 
     # Loads platform specific platform module from source
     def load_platform_util(self, module_name, class_name):

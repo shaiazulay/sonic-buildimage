@@ -1,5 +1,6 @@
 import glob
 import os
+import subprocess
 
 from natsort import natsorted
 from swsssdk import ConfigDBConnector
@@ -123,25 +124,62 @@ def is_multi_asic():
 
 
 def get_asic_id_from_name(asic_name):
+    """
+    Get the asic id from the asic name for multi-asic platforms
+    In single ASIC platforms, it would fail and throw an exception.
 
+    Returns:
+        asic id.
+    """
     if asic_name.startswith(ASIC_NAME_PREFIX):
         return asic_name[len(ASIC_NAME_PREFIX):]
     else:
-        return None
+        raise ValueError('Unknown asic namespace name {}'.format(asic_name))
+
+
+def get_current_namespace():
+    """
+    This API returns the network namespace in which it is
+    invoked. In case of global namepace the API returns None
+    """
+
+    net_namespace = None
+    command = ["/bin/ip netns identify", str(os.getpid())]
+    proc = subprocess.Popen(command,
+                            stdout=subprocess.PIPE,
+                            shell=True,
+                            stderr=subprocess.STDOUT)
+    try:
+        stdout, stderr = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "Command {} failed with stderr {}".format(command, stderr)
+            )
+        if stdout.rstrip('\n') != "":
+            net_namespace = stdout.rstrip('\n')
+    except OSError as e:
+        raise OSError("Error running command {}".format(command))
+
+    return net_namespace
 
 
 def get_namespaces_from_linux():
     """
     In a multi asic platform, each ASIC is in a Linux Namespace.
-    This method returns list of all the Namespace present on the device
+    This method returns the asic namespace under which this is invoked,
+    if namespace is None (global namespace) it returns list of all
+    the Namespace present on the device
 
-    Note: It is preferable to use this function can be used only 
-    when the config_db is not available. 
-    When configdb is available use get_all_namespaces()
+    Note: It is preferable to use this function only when config_db is not
+    available. When configdb is available use get_all_namespaces()
 
     Returns:
         List of the namespaces present in the system
     """
+    current_ns = get_current_namespace()
+    if current_ns:
+        return [current_ns]
+
     ns_list = []
     for path in glob.glob(NAMESPACE_PATH_GLOB):
         ns = os.path.basename(path)
@@ -253,6 +291,17 @@ def is_port_internal(port_name, namespace=None):
     return False
 
 
+def get_external_ports(port_names, namespace=None):
+    external_ports = set()
+    ports_config = get_port_table(namespace)
+    for port in port_names:
+        if port in ports_config:
+            if (PORT_ROLE not in ports_config[port] or
+                    ports_config[port][PORT_ROLE] == EXTERNAL_PORT):
+                external_ports.add(port)
+    return external_ports
+
+
 def is_port_channel_internal(port_channel, namespace=None):
 
     if not is_multi_asic():
@@ -265,7 +314,7 @@ def is_port_channel_internal(port_channel, namespace=None):
         port_channels = config_db.get_table(PORT_CHANNEL_CFG_DB_TABLE)
 
         if port_channel in port_channels:
-            if 'members' in port_channel:
+            if 'members' in port_channels[port_channel]:
                 members = port_channels[port_channel]['members']
                 if is_port_internal(members[0], namespace):
                     return True
@@ -298,3 +347,45 @@ def is_bgp_session_internal(bgp_neigh_ip, namespace=None):
         else:
             return False
     return False
+
+def get_front_end_namespaces():
+    """
+    Get the namespaces in the platform. For multi-asic devices we get the namespaces
+    mapped to asic which have front-panel interfaces. For single ASIC device it is the
+    DEFAULT_NAMESPACE which maps to the linux host.
+
+    Returns:
+        a list of namespaces
+    """
+    namespaces = [DEFAULT_NAMESPACE]
+    if is_multi_asic():
+        ns_list = get_all_namespaces()
+        namespaces = ns_list['front_ns']
+
+    return namespaces
+
+
+def get_asic_index_from_namespace(namespace):
+    """
+    Get asic index from the namespace name.
+    With single ASIC platform, return asic_index 0, which is mapped to the only asic present.
+
+    Returns:
+        asic_index as an integer.
+    """
+    if is_multi_asic():
+        return int(get_asic_id_from_name(namespace))
+
+    return 0
+
+# Validate whether a given namespace name is valid in the device.
+# This API is significant in multi-asic platforms.
+def validate_namespace(namespace):
+    if not is_multi_asic():
+        return True
+
+    namespaces = get_all_namespaces()
+    if namespace in namespaces['front_ns'] + namespaces['back_ns']:
+        return True
+    else:
+        return False
