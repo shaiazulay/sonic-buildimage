@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 try:
+    import sys
     from sonic_platform_base.chassis_base import ChassisBase
     from sonic_platform.sfp import Sfp
     from sonic_platform.psu import Psu
+    from sonic_platform.fan_drawer import fan_drawer_list_get
+    from sonic_platform.thermal import thermal_list_get
     from eeprom import Eeprom
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
@@ -14,19 +17,39 @@ class Chassis(ChassisBase):
     """
     def __init__(self):
         ChassisBase.__init__(self)
-        SFP_PORT_END = Sfp.port_end()
-        PORTS_IN_BLOCK = (SFP_PORT_END + 1)
-        MAX_PSU = Psu.get_num_psus()
 
         self._eeprom = Eeprom()
 
-        for index in range(0, PORTS_IN_BLOCK):
+        for index in range(Sfp.port_start(), Sfp.port_end() + 1):
             sfp_node = Sfp(index)
             self._sfp_list.append(sfp_node)
 
-        for i in range(MAX_PSU):
+        for i in range(1, Psu.get_num_psus() + 1):
             psu = Psu(i)
             self._psu_list.append(psu)
+
+        self.__fan_drawers = None
+        self.__thermals = None
+
+    @property
+    def _fan_drawer_list(self):
+        if self.__fan_drawers is None:
+            self.__fan_drawers = fan_drawer_list_get()
+        return self.__fan_drawers
+
+    @_fan_drawer_list.setter
+    def _fan_drawer_list(self, value):
+        pass
+
+    @property
+    def _thermal_list(self):
+        if self.__thermals is None:
+            self.__thermals = thermal_list_get()
+        return self.__thermals
+
+    @_thermal_list.setter
+    def _thermal_list(self, value):
+        pass
 
     def get_name(self):
         """
@@ -58,7 +81,7 @@ class Chassis(ChassisBase):
         Returns:
             string: Serial number of chassis
         """
-        return self._eeprom.serial_str()
+        return self._eeprom.serial_number_str()
 
     def get_sfp(self, index):
         """
@@ -100,15 +123,6 @@ class Chassis(ChassisBase):
             'XX:XX:XX:XX:XX:XX'
         """
         return self._eeprom.base_mac_addr()
-
-    def get_serial_number(self):
-        """
-        Retrieves the hardware serial number for the chassis
-
-        Returns:
-            A string containing the hardware serial number for this chassis.
-        """
-        return self._eeprom.serial_number_str()
 
     def get_system_eeprom_info(self):
         """
